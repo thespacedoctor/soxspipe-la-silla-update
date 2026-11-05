@@ -100,7 +100,8 @@ download_installer() {
         TEMPORARY_DIR="$(mktemp -d)"
         INSTALLER="$TEMPORARY_DIR/miniforge.sh"
     fi
-    run wget -nv -O "$INSTALLER" "$MINIFORGE_URL"
+    # WSXPL DOES NOT TRUST THE CERTIFICATE ISSUER THAT GITHUB DOWNLOADS USE
+    run wget -nv --no-check-certificate -O "$INSTALLER" "$MINIFORGE_URL"
 }
 
 stop_monit() {

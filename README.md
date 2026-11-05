@@ -30,10 +30,12 @@ You need:
 2. Download the script and run the update:
 
    ```bash
-   wget -O ~/update-pipeline.sh https://raw.githubusercontent.com/thespacedoctor/soxspipe-la-silla-update/main/update-pipeline.sh && bash ~/update-pipeline.sh
+   wget --no-check-certificate -O ~/update-pipeline.sh https://raw.githubusercontent.com/thespacedoctor/soxspipe-la-silla-update/main/update-pipeline.sh && bash ~/update-pipeline.sh
    ```
 
 To see what the script will do first, run `bash ~/update-pipeline.sh --dry-run`. This changes nothing.
+
+**Warning:** `wsxpl` does not trust the certificate issuer of the GitHub downloads, so `wget` uses `--no-check-certificate` for this script and for the miniforge installer. `wget` does not confirm that these files come from GitHub, and both files then run as the `pipeline` user. Someone who controls the network path could run their own code on `wsxpl`.
 
 The script asks no questions. The last line of a good run gives the installed version:
 
@@ -50,7 +52,7 @@ It is safe to run the script again after a failure or a lost connection, because
 The script runs these steps in order:
 
 1. Checks the user name, the home folder, the `monit` and `wget` commands, `/data/reduced`, and the FITS files in `/data/raw`.
-2. Downloads the miniforge installer. A failed download leaves the old install in place.
+2. Downloads the miniforge installer without a certificate check. A failed download leaves the old install in place.
 3. Stops monit.
 4. Stops with an error if a `soxspipe` process is running. The message lists the processes. monit stays stopped, so wait for the processes to finish and run the script again.
 5. Deletes `~/miniforge3`, `~/.conda`, `~/.condarc`, and `~/soxspipe_reductions`.

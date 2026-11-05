@@ -96,6 +96,7 @@ test_full_update_replaces_install_and_starts_monit() {
     assert_exists /data/raw/2026-01-19/frame.fits
     assert_exists /data/reduced/product.fits
     assert_order "monit quit" "installer -b -p $HOME/miniforge3"
+    assert_called "wget -nv --no-check-certificate -O"
     assert_called "conda init bash"
     assert_called "conda create --yes --name soxspipe python=3.12 soxspipe"
     assert_called "soxspipe prep . --vlt cwd=$HOME/soxspipe_reductions"
