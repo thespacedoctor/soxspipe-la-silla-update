@@ -63,7 +63,7 @@ def parse_options(argv)
   opts[:name]      ||= ENV.fetch('NAME') { 'Monit' }
   opts[:status]    ||= ENV.fetch('STATUS') { '' }
   opts[:slack_url] ||= ENV.fetch('SLACK_URL') { read_webhook }
-  opts[:monit_url] ||= ENV.fetch('MONIT_URL') { "http://#{`hostname -f`.chomp}:2812/" }
+  opts[:monit_url] ||= ENV.fetch('MONIT_URL') { "http://#{`hostname -f`.chomp}:8080/" }
   opts[:event]  ||= ENV.fetch('MONIT_EVENT') { '' }
   opts[:service] ||= ENV.fetch('MONIT_SERVICE') { '' }
   opts[:desc] ||= ENV.fetch('MONIT_DESCRIPTION') { '' }
