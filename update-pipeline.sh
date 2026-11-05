@@ -8,9 +8,16 @@ SCRIPT_NAME="update-pipeline.sh"
 PIPELINE_USER="pipeline"
 RAW_DIR="/data/raw"
 REDUCED_DIR="/data/reduced"
+# THE MONIT FILES HARDCODE THIS PATH
+EXPECTED_HOME="/diska/home/pipeline"
 MINIFORGE_DIR="$HOME/miniforge3"
 WORKSPACE_DIR="$HOME/soxspipe_reductions"
 MINIFORGE_URL="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+MONIT_FILES_URL="https://raw.githubusercontent.com/thespacedoctor/soxspipe-la-silla-update/main/monit"
+MONIT_DIR="$HOME/monit"
+MONIT_HTTPD_FILE="$MONIT_DIR/monit-httpd.conf"
+SLACK_WEBHOOK_FILE="$MONIT_DIR/slack-webhook-url"
+ENVIRONMENT_DIR="$MINIFORGE_DIR/envs/soxspipe"
 PYTHON_VERSION="3.12"
 MONIT_STOP_SECONDS="${MONIT_STOP_SECONDS:-30}"
 
@@ -19,7 +26,7 @@ DRY_RUN_PROBLEMS=0
 MONIT_STOPPED=false
 CURRENT_STEP="Starting up"
 TEMPORARY_DIR=""
-INSTALLER="<temporary folder>/miniforge.sh"
+DOWNLOAD_DIR="<temporary folder>"
 SOXSPIPE_VERSION=""
 
 usage() {
@@ -27,7 +34,7 @@ usage() {
 Usage: bash $SCRIPT_NAME [--dry-run | --help]
 
 Stop monit, delete the old pipeline install, install the latest soxspipe,
-prepare the workspace, and start monit. The script does not touch $REDUCED_DIR.
+prepare the workspace, install the monit files, and start monit. The script does not touch $REDUCED_DIR.
 
   --dry-run   Print every step and change nothing.
   --help      Print this message.
@@ -85,6 +92,9 @@ check_machine() {
     [[ "$(id -un)" == "$PIPELINE_USER" ]] || stop "Run this script as the $PIPELINE_USER user."
     # THE DELETE STEP WORKS FROM $HOME, SO IT MUST BE THE REAL HOME FOLDER OF THE ACCOUNT
     [[ "$HOME" == "$(getent passwd "$PIPELINE_USER" | cut -d: -f6)" ]] || stop "HOME is not the home folder of the $PIPELINE_USER user."
+    [[ "$HOME" -ef "$EXPECTED_HOME" ]] || stop "The monit files need the home folder $EXPECTED_HOME, but HOME is $HOME."
+    [[ -f "$MONIT_HTTPD_FILE" ]] || stop "The private file $MONIT_HTTPD_FILE is missing. The README tells you how to make it."
+    [[ -f "$SLACK_WEBHOOK_FILE" ]] || echo "WARNING: $SLACK_WEBHOOK_FILE is missing, so monit will not send Slack alerts."
     command -v monit >/dev/null || stop "The monit command is not available."
     command -v wget >/dev/null || stop "The wget command is not available."
     [[ -d "$REDUCED_DIR" ]] || stop "The folder $REDUCED_DIR does not exist."
@@ -98,10 +108,31 @@ download_installer() {
     step "Downloading miniforge"
     if [[ "$DRY_RUN" == false ]]; then
         TEMPORARY_DIR="$(mktemp -d)"
-        INSTALLER="$TEMPORARY_DIR/miniforge.sh"
+        DOWNLOAD_DIR="$TEMPORARY_DIR"
     fi
     # WSXPL DOES NOT TRUST THE CERTIFICATE ISSUER THAT GITHUB DOWNLOADS USE
-    run wget -nv --no-check-certificate -O "$INSTALLER" "$MINIFORGE_URL"
+    run wget -nv --no-check-certificate -O "$DOWNLOAD_DIR/miniforge.sh" "$MINIFORGE_URL"
+}
+
+download_monit_files() {
+    step "Downloading the monit files"
+    local name
+    for name in monitrc monit2slack.rb soxspipe-cycle.sh; do
+        run wget -nv --no-check-certificate -O "$DOWNLOAD_DIR/$name" "$MONIT_FILES_URL/$name"
+    done
+}
+
+# THIS COMES BEFORE THE DELETE, SO BAD SETTINGS LEAVE THE OLD INSTALL AND MONIT RUNNING.
+# `monit -t` NEEDS THE PROGRAMS THAT THE SETTINGS NAME, SO THE TWO SCRIPTS GO IN FIRST.
+install_monit_scripts() {
+    step "Installing the monit scripts"
+    run install -m 700 "$DOWNLOAD_DIR/monit2slack.rb" "$DOWNLOAD_DIR/soxspipe-cycle.sh" "$MONIT_DIR/"
+    run chmod 600 "$MONIT_HTTPD_FILE"
+    if [[ -f "$SLACK_WEBHOOK_FILE" ]]; then
+        run chmod 600 "$SLACK_WEBHOOK_FILE"
+    fi
+    run chmod 700 "$DOWNLOAD_DIR/monitrc"
+    run monit -t -c "$DOWNLOAD_DIR/monitrc"
 }
 
 stop_monit() {
@@ -145,7 +176,7 @@ leave_old_conda_environment() {
 install_miniforge() {
     step "Installing miniforge"
     leave_old_conda_environment
-    run bash "$INSTALLER" -b -p "$MINIFORGE_DIR"
+    run bash "$DOWNLOAD_DIR/miniforge.sh" -b -p "$MINIFORGE_DIR"
     run "$MINIFORGE_DIR/bin/conda" init bash
 }
 
@@ -157,9 +188,12 @@ install_soxspipe() {
         # shellcheck source=/dev/null
         source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
     fi
-    run conda create --yes --name soxspipe "python=$PYTHON_VERSION" soxspipe
+    run conda create --yes --name soxspipe "python=$PYTHON_VERSION" soxspipe ruby
     run conda activate soxspipe
     if [[ "$DRY_RUN" == false ]]; then
+        # monit2slack.rb NEEDS BOTH OF THESE. A MISSING RUBY IS WHAT STOPPED SLACK ALERTS BEFORE
+        [[ -x "$ENVIRONMENT_DIR/bin/ruby" ]] || stop "There is no ruby in the soxspipe environment."
+        [[ -f "$ENVIRONMENT_DIR/ssl/cert.pem" ]] || stop "There is no ssl/cert.pem in the soxspipe environment."
         SOXSPIPE_VERSION="$(conda list --name soxspipe --full-name soxspipe | awk '$1 == "soxspipe" {print $2}')"
         [[ -n "$SOXSPIPE_VERSION" ]] || stop "conda does not list a soxspipe version."
     fi
@@ -173,6 +207,15 @@ prepare_workspace() {
     run soxspipe prep . --vlt
     # `soxspipe prep` CAN EXIT WITH STATUS 0 AND LEAVE A PARTIAL WORKSPACE WITH A DATABASE BUT NO SESSION
     [[ "$DRY_RUN" == true || -f soxspipe.yaml ]] || stop "soxspipe prep did not finish: there is no soxspipe.yaml in $WORKSPACE_DIR."
+}
+
+install_monit_settings() {
+    step "Installing the monit settings"
+    # ONLY THE FIRST BACKUP HOLDS THE ORIGINAL SETTINGS, SO A RERUN KEEPS IT
+    if [[ -f "$HOME/.monitrc" && ! -e "$HOME/.monitrc.bak" ]]; then
+        run install -m 600 "$HOME/.monitrc" "$HOME/.monitrc.bak"
+    fi
+    run install -m 700 "$DOWNLOAD_DIR/monitrc" "$HOME/.monitrc"
 }
 
 start_monit() {
@@ -209,12 +252,15 @@ main() {
 
     check_machine
     download_installer
+    download_monit_files
+    install_monit_scripts
     stop_monit
     check_no_soxspipe_running
     remove_old_install
     install_miniforge
     install_soxspipe
     prepare_workspace
+    install_monit_settings
     start_monit
     report_result
 }

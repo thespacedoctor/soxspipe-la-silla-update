@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# STAND-IN FOR WGET: "DOWNLOADS" A FAKE MINIFORGE INSTALLER
+# STAND-IN FOR WGET: "DOWNLOADS" A FAKE MINIFORGE INSTALLER OR THE REPO COPY OF A MONIT FILE
 echo "wget $*" >>"$CALLS"
 [[ "${STUB_FAIL:-}" == "wget" ]] && exit 4
+target=""
 while [[ $# -gt 0 ]]; do
-    if [[ "$1" == "-O" ]]; then
-        cp "$STUBS_DIR/fake-miniforge-installer" "$2"
-    fi
+    [[ "$1" == "-O" ]] && target="$2"
+    url="$1"
     shift
 done
+[[ "${STUB_FAIL:-}" == "wget-monit" && "$url" == */monit/* ]] && exit 4
+if [[ "$url" == */monit/* ]]; then
+    cp "/repo/monit/$(basename "$url")" "$target"
+else
+    cp "$STUBS_DIR/fake-miniforge-installer" "$target"
+fi

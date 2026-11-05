@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# STAND-IN FOR RUBY: RECORDS THE VERSION CHECK
+echo "ruby $*" >>"$CALLS"

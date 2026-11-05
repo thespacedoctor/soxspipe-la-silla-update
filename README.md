@@ -6,18 +6,46 @@ This page tells you how to update, run, and monitor the SOXS data-reduction pipe
 
 ## Contents
 
+- [Make the private monit files](#make-the-private-monit-files)
 - [Update the pipeline](#update-the-pipeline)
 - [What the script does](#what-the-script-does)
 - [Remove the reduced frames (optional)](#remove-the-reduced-frames-optional)
 - [Use monit to control the pipeline](#use-monit-to-control-the-pipeline)
+- [Repair Slack alerts without an update](#repair-slack-alerts-without-an-update)
 - [Common errors](#common-errors)
 - [Test the script](#test-the-script)
+
+## Make the private monit files
+
+This repository is public, so 2 private files stay on `wsxpl`. Make them once, as the `pipeline` user. The script never changes or deletes them.
+
+1. Make the monit web settings file. Replace `MONIT_WEB_PASSWORD` with the real password:
+
+   ```bash
+   cat > ~/monit/monit-httpd.conf <<'EOF'
+   set httpd port 8080 and
+       use address localhost
+       allow localhost
+       allow pipeline:MONIT_WEB_PASSWORD
+   EOF
+   chmod 600 ~/monit/monit-httpd.conf
+   ```
+
+2. Save the Slack webhook. Replace `SLACK_WEBHOOK_URL` with the real URL:
+
+   ```bash
+   echo 'SLACK_WEBHOOK_URL' > ~/monit/slack-webhook-url
+   chmod 600 ~/monit/slack-webhook-url
+   ```
+
+The script stops if `monit-httpd.conf` is missing, because the monit web page does not work without it. If `slack-webhook-url` is missing, the script gives a warning and continues. Monit then runs without Slack alerts, and each alert writes a line in `~/monit/monit.log`.
 
 ## Update the pipeline
 
 You need:
 
-- A login to `wsxpl` as the `pipeline` user.
+- A login to `wsxpl` as the `pipeline` user, with the home folder `/diska/home/pipeline`.
+- The [private monit files](#make-the-private-monit-files).
 - At least 1 FITS file in a dated folder in `/data/raw`, such as `/data/raw/2026-01-19/`. No frames directly in `/data/raw`.
 - No running `soxspipe` process. The script stops if it finds one.
 
@@ -35,7 +63,7 @@ You need:
 
 To see what the script will do first, run `bash ~/update-pipeline.sh --dry-run`. This changes nothing.
 
-**Warning:** `wsxpl` does not trust the certificate issuer of the GitHub downloads, so `wget` uses `--no-check-certificate` for this script and for the miniforge installer. `wget` does not confirm that these files come from GitHub, and both files then run as the `pipeline` user. Someone who controls the network path could run their own code on `wsxpl`.
+**Warning:** `wsxpl` does not trust the certificate issuer of the GitHub downloads, so `wget` uses `--no-check-certificate` for this script, the miniforge installer, and the monit files. `wget` does not confirm that these files come from GitHub. They all run as the `pipeline` user, and monit runs its files again and again. Someone who controls the network path could run their own code on `wsxpl`.
 
 The script asks no questions. The last line of a good run gives the installed version:
 
@@ -51,17 +79,19 @@ It is safe to run the script again after a failure or a lost connection, because
 
 The script runs these steps in order:
 
-1. Checks the user name, the home folder, the `monit` and `wget` commands, `/data/reduced`, and the FITS files in `/data/raw`.
-2. Downloads the miniforge installer without a certificate check. A failed download leaves the old install in place.
-3. Stops monit.
-4. Stops with an error if a `soxspipe` process is running. The message lists the processes. monit stays stopped, so wait for the processes to finish and run the script again.
-5. Deletes `~/miniforge3`, `~/.conda`, `~/.condarc`, and `~/soxspipe_reductions`.
-6. Installs miniforge in `~/miniforge3` and sets up conda for new shells.
-7. Creates the `soxspipe` conda environment with Python 3.12 and the latest `soxspipe` from conda-forge.
-8. Runs `soxspipe prep . --vlt` in a new `~/soxspipe_reductions` workspace.
-9. Starts monit.
+1. Checks the user name, the home folder, the private monit files, the `monit` and `wget` commands, `/data/reduced`, and the FITS files in `/data/raw`.
+2. Downloads the miniforge installer and the monit files without a certificate check. A failed download leaves the old install in place.
+3. Replaces `~/monit/monit2slack.rb` and `~/monit/soxspipe-cycle.sh` with the copies in the `monit` folder of this repository, and sets the private files to mode 600. Stops if `monit -t` finds a problem in the new settings. This leaves the old conda install in place and monit running.
+4. Stops monit.
+5. Stops with an error if a `soxspipe` process is running. The message lists the processes. monit stays stopped, so wait for the processes to finish and run the script again.
+6. Deletes `~/miniforge3`, `~/.conda`, `~/.condarc`, and `~/soxspipe_reductions`.
+7. Installs miniforge in `~/miniforge3` and sets up conda for new shells.
+8. Creates the `soxspipe` conda environment with Python 3.12, Ruby, and the latest `soxspipe` from conda-forge. `monit2slack.rb` needs the Ruby.
+9. Runs `soxspipe prep . --vlt` in a new `~/soxspipe_reductions` workspace.
+10. Replaces `~/.monitrc` with the copy in the `monit` folder of this repository. The first run keeps the old settings in `~/.monitrc.bak`.
+11. Starts monit.
 
-**Warning:** Step 5 deletes the workspace database, `soxspipe.db`, and its `backups/` folder. This removes the QC history that the database holds. The frames in `/data/raw` and `/data/reduced` stay in place.
+**Warning:** Step 6 deletes the workspace database, `soxspipe.db`, and its `backups/` folder. This removes the QC history that the database holds. The frames in `/data/raw` and `/data/reduced` stay in place.
 
 Miniforge is a small installer for the conda package manager. It is not part of Anaconda. It uses the community conda-forge channel, so installing it on ESO machines does not break any license.
 
@@ -91,7 +121,7 @@ If you remove the frames in `/data/reduced`, the pipeline reduces all the frames
 
 ## Use monit to control the pipeline
 
-Monit is a small tool that monitors and restarts processes. Its settings are in `~/.monitrc`. You do not need to change this file. Monit runs a cycle every 60 seconds, and it runs the pipeline in batches of 25 recipes.
+Monit is a small tool that monitors and restarts processes. Its settings are in `~/.monitrc`. The update script replaces this file, so make any lasting change in `monit/monitrc` in this repository. Monit runs a cycle every 60 seconds, and it runs the pipeline in batches of 25 recipes.
 
 Monit does these things:
 
@@ -132,6 +162,15 @@ Select the **soxspipe** link to see the logs of the previous run of 25 recipes. 
 
 ```bash
 monit quit
+```
+
+## Repair Slack alerts without an update
+
+Use these steps if Slack alerts fail with `bad interpreter`, and you do not want to run the update script. The update script deletes `soxspipe.db` and its QC history, and these steps do not.
+
+```bash
+~/miniforge3/bin/conda install --yes --name soxspipe ruby
+sed -i '1s|.*|#!/diska/home/pipeline/miniforge3/envs/soxspipe/bin/ruby|' ~/monit/monit2slack.rb
 ```
 
 ## Common errors
@@ -244,7 +283,7 @@ Recipe Command: soxspipe nod sof/20260124T071706_NIR_3_NOD_STD_FLUX_SLIT1_5_1_7S
 
 ## Test the script
 
-The tests need Docker and `shellcheck`. They run in a throwaway container with stand-ins for monit, wget, conda, and `soxspipe`, and they never touch a real install.
+The tests need Docker and `shellcheck`. They run in a throwaway container with stand-ins for monit, wget, conda, Ruby, and `soxspipe`, and they never touch a real install.
 
 ```bash
 tests/run-tests.sh

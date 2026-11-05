@@ -7,6 +7,10 @@ case "$1" in
         [[ "${STUB_FAIL:-}" == "conda-create" ]] && exit 1
         mkdir -p "$prefix/envs/soxspipe/bin"
         cp "$STUBS_DIR/fake-soxspipe" "$prefix/envs/soxspipe/bin/soxspipe"
+        [[ "${STUB_FAIL:-}" == "no-ruby" ]] && exit 0
+        cp "$STUBS_DIR/fake-ruby" "$prefix/envs/soxspipe/bin/ruby"
+        mkdir -p "$prefix/envs/soxspipe/ssl"
+        touch "$prefix/envs/soxspipe/ssl/cert.pem"
         ;;
     list)
         echo "# packages in environment"

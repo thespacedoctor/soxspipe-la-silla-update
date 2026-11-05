@@ -21,12 +21,16 @@ FAILED=0
 # REBUILD THE FAKE WORKSTATION: AN OLD INSTALL, RAW DATA, AND A RUNNING MONIT
 reset_machine() {
     stop_fake_monit
-    rm -rf "${HOME:?}"/miniforge3 "$HOME/.conda" "$HOME/.condarc" "$HOME/soxspipe_reductions" /data/raw/* /data/reduced/* "$BIN_DIR"
+    rm -rf "${HOME:?}"/miniforge3 "$HOME/.conda" "$HOME/.condarc" "$HOME/soxspipe_reductions" "$HOME/monit" "$HOME/.monitrc.bak" /data/raw/* /data/reduced/* "$BIN_DIR"
     : >"$CALLS"
     unset STUB_FAIL
     mkdir -p "$HOME/miniforge3/old" "$HOME/.conda" "$HOME/soxspipe_reductions" "$BIN_DIR"
     mkdir -p /data/raw/2026-01-19
-    touch "$HOME/.condarc" "$HOME/.monitrc" /data/raw/2026-01-19/frame.fits /data/reduced/product.fits
+    touch "$HOME/.condarc" /data/raw/2026-01-19/frame.fits /data/reduced/product.fits
+    echo "old settings" >"$HOME/.monitrc"
+    mkdir -p "$HOME/monit"
+    echo "private httpd" >"$HOME/monit/monit-httpd.conf"
+    echo "https://example.invalid/webhook" >"$HOME/monit/slack-webhook-url"
     ln -s /data/raw "$HOME/soxspipe_reductions/raw"
     ln -sf "$STUBS_DIR/monit" "$STUBS_DIR/wget" "$BIN_DIR/"
     mkdir -p "$(dirname "$FAKE_DAEMON")"
@@ -98,11 +102,103 @@ test_full_update_replaces_install_and_starts_monit() {
     assert_order "monit quit" "installer -b -p $HOME/miniforge3"
     assert_called "wget -nv --no-check-certificate -O"
     assert_called "conda init bash"
-    assert_called "conda create --yes --name soxspipe python=3.12 soxspipe"
+    assert_called "conda create --yes --name soxspipe python=3.12 soxspipe ruby"
     assert_called "soxspipe prep . --vlt cwd=$HOME/soxspipe_reductions"
     assert_last_call "monit "
     assert_monit_running
     assert_output "soxspipe 9.9.9"
+}
+
+assert_mode() { [[ "$(stat -c %a "$1")" == "$2" ]] || fail "$1 has mode $(stat -c %a "$1"), not $2"; }
+
+test_full_update_installs_the_monit_files() {
+    run_script
+    assert_exit_zero
+    cmp -s /repo/monit/monitrc "$HOME/.monitrc" || fail ".monitrc is not the repo copy"
+    cmp -s /repo/monit/monit2slack.rb "$HOME/monit/monit2slack.rb" || fail "monit2slack.rb is not the repo copy"
+    cmp -s /repo/monit/soxspipe-cycle.sh "$HOME/monit/soxspipe-cycle.sh" || fail "soxspipe-cycle.sh is not the repo copy"
+    assert_mode "$HOME/.monitrc" 700
+    assert_mode "$HOME/monit/monit2slack.rb" 700
+    assert_mode "$HOME/monit/soxspipe-cycle.sh" 700
+    assert_order "monit -t" "monit quit"
+    assert_mode "$HOME/monit/monit-httpd.conf" 600
+    assert_mode "$HOME/monit/slack-webhook-url" 600
+    grep -qx "private httpd" "$HOME/monit/monit-httpd.conf" || fail "monit-httpd.conf changed"
+    grep -qx "https://example.invalid/webhook" "$HOME/monit/slack-webhook-url" || fail "slack-webhook-url changed"
+}
+
+test_keeps_the_old_monit_settings_as_a_backup() {
+    run_script
+    assert_exit_zero
+    grep -qx "old settings" "$HOME/.monitrc.bak" || fail ".monitrc.bak does not hold the old settings"
+    assert_mode "$HOME/.monitrc.bak" 600
+}
+
+test_second_run_does_not_overwrite_the_backup() {
+    run_script
+    assert_exit_zero
+    echo "newer settings" >"$HOME/.monitrc"
+    run_script
+    assert_exit_zero
+    grep -qx "old settings" "$HOME/.monitrc.bak" || fail "the second run replaced .monitrc.bak"
+}
+
+test_stops_before_touching_anything_when_httpd_settings_are_missing() {
+    rm "$HOME/monit/monit-httpd.conf"
+    run_script
+    assert_exit_nonzero
+    assert_old_install_kept
+    assert_monit_running
+    assert_not_called "monit quit"
+    assert_output "monit-httpd.conf"
+}
+
+test_missing_slack_webhook_gives_a_warning_and_the_update_finishes() {
+    rm "$HOME/monit/slack-webhook-url"
+    run_script
+    assert_exit_zero
+    assert_output "WARNING"
+    assert_output "slack-webhook-url"
+    assert_monit_running
+}
+
+test_stops_before_touching_anything_when_home_is_not_the_folder_the_monit_files_use() {
+    mkdir -p /tmp/other-home/monit
+    touch /tmp/other-home/monit/monit-httpd.conf
+    printf '#!/usr/bin/env bash\necho "pipeline:x:1000:1000::/tmp/other-home:/bin/bash"\n' >"$BIN_DIR/getent"
+    chmod +x "$BIN_DIR/getent"
+    HOME=/tmp/other-home run_script
+    rm -rf /tmp/other-home
+    assert_exit_nonzero
+    assert_old_install_kept
+    assert_not_called "monit quit"
+    assert_output "/diska/home/pipeline"
+}
+
+test_failed_monit_file_download_leaves_old_install_and_monit_running() {
+    export STUB_FAIL="wget-monit"
+    run_script
+    assert_exit_nonzero
+    assert_old_install_kept
+    assert_monit_running
+    assert_not_called "monit quit"
+}
+
+test_invalid_monit_settings_stop_before_touching_the_install() {
+    export STUB_FAIL="monit-syntax"
+    run_script
+    assert_exit_nonzero
+    assert_old_install_kept
+    assert_monit_running
+    assert_not_called "monit quit"
+    grep -qx "old settings" "$HOME/.monitrc" || fail ".monitrc changed"
+}
+
+test_missing_ruby_stops_before_prep_and_monit_stays_stopped() {
+    export STUB_FAIL="no-ruby"
+    run_script
+    assert_stopped_with_monit_down "Installing soxspipe"
+    assert_not_called "soxspipe prep"
 }
 
 test_stops_before_deleting_when_soxspipe_is_running() {
@@ -304,7 +400,9 @@ test_dry_run_prints_every_step_and_changes_nothing() {
     assert_output "rm -rf $HOME/miniforge3 $HOME/.conda $HOME/.condarc $HOME/soxspipe_reductions"
     assert_output "-b -p $HOME/miniforge3"
     assert_output "conda init bash"
-    assert_output "conda create --yes --name soxspipe python=3.12 soxspipe"
+    assert_output "conda create --yes --name soxspipe python=3.12 soxspipe ruby"
+    assert_output "monit/monit2slack.rb"
+    assert_output "monit -t"
     assert_output "conda activate soxspipe"
     assert_output "soxspipe prep . --vlt"
     assert_output "Starting monit"

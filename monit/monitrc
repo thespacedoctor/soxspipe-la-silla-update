@@ -1,0 +1,50 @@
+###############################################################################
+## Global section
+###############################################################################
+
+## DAEMON MODE
+set daemon 60              # check services at N seconds intervals
+
+# LOG FILE LOCATION
+set log /diska/home/pipeline/monit/monit.log
+
+# DEFAULT LIMITS
+set limits {
+    programOutput:     1 MB,      # check program's output truncate limit
+    sendExpectBuffer:  256 B,      # limit for send/expect protocol test
+    fileContentBuffer: 512 B,      # limit for file content test
+    httpContentBuffer: 1 MB,       # limit for HTTP content test
+    networkTimeout:    5 seconds   # timeout for network I/O
+    programTimeout:    900 seconds # timeout for check program
+    stopTimeout:       30 seconds  # timeout for service stop
+    startTimeout:      30 seconds  # timeout for service start
+    restartTimeout:    30 seconds  # timeout for service restart
+}
+
+include /diska/home/pipeline/monit/monit-httpd.conf
+
+###############################################################################
+## Services
+###############################################################################
+
+## CHECK DISK USAGE
+check filesystem pipeline-data with path "/diskb/"
+   if space usage > 90% for 3 times within 5 cycles then exec "/diska/home/pipeline/monit/monit2slack.rb --status warning --event 'pipeline hardrive is nearly full'"
+
+## GENERAL SYSTEM RESOURCES
+# LOAD AVERAGE IS THE NUMBER OF PROCESSES IN THE SYSTEM RUN
+# QUEUE PER CPU CORE, AVERAGED OVER THE SPECIFIED TIME PERIOD
+check system $HOST
+    if loadavg (5min) per core > 1.5 for 10 cycles then exec "/diska/home/pipeline/monit/monit2slack.rb --status warning --event 'heavy cpu load'"
+    if cpu usage > 95% for 10 cycles then exec "/diska/home/pipeline/monit/monit2slack.rb --status warning --event 'heavy cpu load'"
+    if memory usage > 75% for 3 cycles then exec "/diska/home/pipeline/monit/monit2slack.rb --status warning --event 'heavy memory usage'"
+    if swap usage > 25% for 3 cycles then exec "/diska/home/pipeline/monit/monit2slack.rb --status warning --event 'very high memory swapping'"
+
+# RUN SOXSPIPE WITH BATCH OF 25 RECIPES - TIMEOUT 3 HOURS
+check program soxspipe with path "/diska/home/pipeline/monit/soxspipe-cycle.sh"
+    with timeout 10800 seconds
+    EVERY 1 CYCLES
+    if status > 0 for 2 times within 3 cycles then exec "/diska/home/pipeline/monit/monit2slack.rb --status error --event 'soxspipe failed'"
+    else if succeeded then exec "/diska/home/pipeline/monit/monit2slack.rb --status ok --event 'soxspipe is now running again'"
+
+
