@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Replace the soxspipe install on the La Silla pipeline workstation with a fresh one.
-# README.md explains when to run this script and what it does.
+# REPLACE THE SOXSPIPE INSTALL ON THE LA SILLA PIPELINE WORKSTATION WITH A FRESH ONE.
+# README.md EXPLAINS WHEN TO RUN THIS SCRIPT AND WHAT IT DOES.
 set -euo pipefail
 
 SCRIPT_NAME="update-pipeline.sh"
@@ -18,7 +18,8 @@ DRY_RUN=false
 DRY_RUN_PROBLEMS=0
 MONIT_STOPPED=false
 CURRENT_STEP="Starting up"
-INSTALLER_DIR=""
+TEMPORARY_DIR=""
+INSTALLER="<temporary folder>/miniforge.sh"
 SOXSPIPE_VERSION=""
 
 usage() {
@@ -59,8 +60,8 @@ stop() {
 
 on_exit() {
     local exitCode=$?
-    if [[ -n "$INSTALLER_DIR" ]]; then
-        rm -rf "$INSTALLER_DIR"
+    if [[ -n "$TEMPORARY_DIR" ]]; then
+        rm -rf "$TEMPORARY_DIR"
     fi
     if [[ "$exitCode" -eq 0 || "$DRY_RUN" == true ]]; then
         return
@@ -74,27 +75,32 @@ on_exit() {
     echo "Fix the problem, then run this script again." >&2
 }
 
-has_fits_file() {
+first_fits_file() {
     # THE SAME FILE NAMES THAT `soxspipe prep` COUNTS AS RAW FRAMES
-    [[ -n "$(find "$RAW_DIR/" \( -iname '*.fits' -o -name '*.[fF][iI][tT][sS].Z' \) -print -quit 2>/dev/null)" ]]
+    find "$RAW_DIR/" "$@" \( -iname '*.fits' -o -name '*.[fF][iI][tT][sS].Z' \) -print -quit 2>/dev/null
 }
 
 check_machine() {
     step "Checking the machine"
     [[ "$(id -un)" == "$PIPELINE_USER" ]] || stop "Run this script as the $PIPELINE_USER user."
+    # THE DELETE STEP WORKS FROM $HOME, SO IT MUST BE THE REAL HOME FOLDER OF THE ACCOUNT
+    [[ "$HOME" == "$(getent passwd "$PIPELINE_USER" | cut -d: -f6)" ]] || stop "HOME is not the home folder of the $PIPELINE_USER user."
     command -v monit >/dev/null || stop "The monit command is not available."
     command -v wget >/dev/null || stop "The wget command is not available."
     [[ -d "$REDUCED_DIR" ]] || stop "The folder $REDUCED_DIR does not exist."
-    has_fits_file || stop "There are no FITS files in $RAW_DIR, so soxspipe prep cannot run."
+    [[ -n "$(first_fits_file)" ]] || stop "There are no FITS files in $RAW_DIR, so soxspipe prep cannot run."
+    # `soxspipe prep --vlt` CANNOT FINISH WITH A FRAME OUTSIDE A DATED FOLDER, AND THE OLD INSTALL WOULD ALREADY BE GONE
+    [[ -z "$(first_fits_file -maxdepth 1)" ]] || stop "FITS frames sit directly in $RAW_DIR. Move each one into its dated folder, such as $RAW_DIR/2026-01-19/."
 }
 
 # THE DOWNLOAD COMES BEFORE THE DELETE, SO A NETWORK FAILURE LEAVES THE OLD INSTALL WORKING
 download_installer() {
     step "Downloading miniforge"
     if [[ "$DRY_RUN" == false ]]; then
-        INSTALLER_DIR="$(mktemp -d)"
+        TEMPORARY_DIR="$(mktemp -d)"
+        INSTALLER="$TEMPORARY_DIR/miniforge.sh"
     fi
-    run wget -nv -O "$INSTALLER_DIR/miniforge.sh" "$MINIFORGE_URL"
+    run wget -nv -O "$INSTALLER" "$MINIFORGE_URL"
 }
 
 stop_monit() {
@@ -138,24 +144,25 @@ leave_old_conda_environment() {
 install_miniforge() {
     step "Installing miniforge"
     leave_old_conda_environment
-    run bash "$INSTALLER_DIR/miniforge.sh" -b -p "$MINIFORGE_DIR"
+    run bash "$INSTALLER" -b -p "$MINIFORGE_DIR"
     run "$MINIFORGE_DIR/bin/conda" init bash
 }
 
 install_soxspipe() {
     step "Installing soxspipe"
-    if [[ "$DRY_RUN" == true ]]; then
-        echo "would run: conda create --yes --name soxspipe python=$PYTHON_VERSION soxspipe"
-        echo "would run: conda activate soxspipe"
-        return 0
-    fi
-    # CONDA'S SHELL FUNCTIONS READ UNSET VARIABLES, SO THIS STAYS OFF FROM HERE ON
+    # CONDA'S SHELL FUNCTIONS READ UNSET VARIABLES
     set +u
-    # shellcheck source=/dev/null
-    source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+    if [[ "$DRY_RUN" == false ]]; then
+        # shellcheck source=/dev/null
+        source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+    fi
     run conda create --yes --name soxspipe "python=$PYTHON_VERSION" soxspipe
     run conda activate soxspipe
-    SOXSPIPE_VERSION="$(conda list --name soxspipe --full-name soxspipe | awk '$1 == "soxspipe" {print $2}')"
+    if [[ "$DRY_RUN" == false ]]; then
+        SOXSPIPE_VERSION="$(conda list --name soxspipe --full-name soxspipe | awk '$1 == "soxspipe" {print $2}')"
+        [[ -n "$SOXSPIPE_VERSION" ]] || stop "conda does not list a soxspipe version."
+    fi
+    set -u
 }
 
 prepare_workspace() {
@@ -170,6 +177,7 @@ prepare_workspace() {
 start_monit() {
     step "Starting monit"
     run monit
+    [[ "$DRY_RUN" == true ]] || pgrep -u "$PIPELINE_USER" -x monit >/dev/null || stop "monit is not running after the start command."
 }
 
 report_result() {

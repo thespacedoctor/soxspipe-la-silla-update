@@ -10,6 +10,7 @@ case "$1" in
         ;;
     list)
         echo "# packages in environment"
+        [[ "${STUB_FAIL:-}" == "no-version" ]] && exit 0
         echo "soxspipe    9.9.9    pyhd8ed1ab_0    conda-forge"
         ;;
 esac

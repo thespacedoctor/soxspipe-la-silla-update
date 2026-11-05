@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Behaviour tests for update-pipeline.sh. Run these with run-tests.sh, never directly.
+# BEHAVIOUR TESTS FOR update-pipeline.sh. RUN THESE WITH run-tests.sh, NEVER DIRECTLY.
 set -uo pipefail
 
 if [[ ! -f /.dockerenv ]]; then
@@ -20,17 +20,25 @@ FAILED=0
 
 # REBUILD THE FAKE WORKSTATION: AN OLD INSTALL, RAW DATA, AND A RUNNING MONIT
 reset_machine() {
-    pkill -f "^$FAKE_DAEMON"
+    stop_fake_monit
     rm -rf "${HOME:?}"/miniforge3 "$HOME/.conda" "$HOME/.condarc" "$HOME/soxspipe_reductions" /data/raw/* /data/reduced/* "$BIN_DIR"
     : >"$CALLS"
     unset STUB_FAIL
     mkdir -p "$HOME/miniforge3/old" "$HOME/.conda" "$HOME/soxspipe_reductions" "$BIN_DIR"
-    touch "$HOME/.condarc" "$HOME/.monitrc" /data/raw/frame.fits /data/reduced/product.fits
+    mkdir -p /data/raw/2026-01-19
+    touch "$HOME/.condarc" "$HOME/.monitrc" /data/raw/2026-01-19/frame.fits /data/reduced/product.fits
     ln -s /data/raw "$HOME/soxspipe_reductions/raw"
     ln -sf "$STUBS_DIR/monit" "$STUBS_DIR/wget" "$BIN_DIR/"
     mkdir -p "$(dirname "$FAKE_DAEMON")"
     cp /bin/sleep "$FAKE_DAEMON"
     "$FAKE_DAEMON" 600 &
+}
+
+stop_fake_monit() {
+    pkill -f "^$FAKE_DAEMON" || true
+    while pgrep -x monit >/dev/null; do
+        sleep 0.1
+    done
 }
 
 rmdir_reduced() { rm -rf /data/reduced; }
@@ -66,7 +74,7 @@ assert_old_install_kept() { assert_exists "$HOME/miniforge3/old"; assert_exists 
 
 scenario() {
     CURRENT_FAILED=0
-    reset_machine 2>/dev/null
+    reset_machine
     "$1"
     if [[ "$CURRENT_FAILED" -eq 0 ]]; then
         echo "ok      $1"
@@ -85,7 +93,7 @@ test_full_update_replaces_install_and_starts_monit() {
     assert_missing "$HOME/.condarc"
     assert_exists "$HOME/soxspipe_reductions/soxspipe.yaml"
     assert_exists "$HOME/.monitrc"
-    assert_exists /data/raw/frame.fits
+    assert_exists /data/raw/2026-01-19/frame.fits
     assert_exists /data/reduced/product.fits
     assert_order "monit quit" "installer -b -p $HOME/miniforge3"
     assert_called "conda init bash"
@@ -121,7 +129,7 @@ test_does_not_mistake_itself_for_a_running_soxspipe() {
 }
 
 test_stops_before_touching_anything_when_raw_folder_has_no_fits() {
-    rm /data/raw/frame.fits
+    rm /data/raw/2026-01-19/frame.fits
     touch /data/raw/notes.txt
     run_script
     assert_exit_nonzero
@@ -132,7 +140,7 @@ test_stops_before_touching_anything_when_raw_folder_has_no_fits() {
 }
 
 test_accepts_compressed_fits_in_a_subfolder_of_raw() {
-    rm /data/raw/frame.fits
+    rm /data/raw/2026-01-19/frame.fits
     mkdir -p /data/raw/2026-11-05
     touch /data/raw/2026-11-05/frame.fits.Z
     run_script
@@ -155,7 +163,27 @@ test_refuses_to_run_as_another_user() {
     assert_exit_nonzero
     assert_old_install_kept
     assert_monit_running
-    assert_output "pipeline"
+    assert_output "Run this script as the pipeline user"
+}
+
+test_refuses_to_run_with_a_wrong_home_folder() {
+    mkdir -p /tmp/other-home/miniforge3
+    HOME=/tmp/other-home run_script
+    assert_exit_nonzero
+    assert_exists /tmp/other-home/miniforge3
+    assert_old_install_kept
+    assert_output "HOME"
+    rm -rf /tmp/other-home
+}
+
+test_stops_before_touching_anything_when_a_frame_is_directly_in_raw() {
+    touch /data/raw/loose.fits
+    run_script
+    assert_exit_nonzero
+    assert_old_install_kept
+    assert_monit_running
+    assert_not_called "monit quit"
+    assert_output "dated folder"
 }
 
 test_failed_download_leaves_old_install_and_monit_running() {
@@ -172,12 +200,11 @@ test_stops_when_monit_does_not_stop() {
     MONIT_STOP_SECONDS=1 run_script
     assert_exit_nonzero
     assert_old_install_kept
-    assert_output "monit"
+    assert_output "monit did not stop"
 }
 
 test_runs_when_monit_is_already_stopped() {
-    pkill -f "^$FAKE_DAEMON"
-    sleep 0.2
+    stop_fake_monit
     run_script
     assert_exit_zero
     assert_monit_running
@@ -222,14 +249,27 @@ test_failed_monit_start_is_reported() {
     export STUB_FAIL="monit-start"
     run_script
     assert_exit_nonzero
-    assert_output "Starting monit"
+    assert_output "FAILED during this step: Starting monit"
+}
+
+test_monit_that_exits_zero_but_is_not_running_is_a_failure() {
+    export STUB_FAIL="monit-start-silent"
+    run_script
+    assert_exit_nonzero
+    assert_output "FAILED during this step: Starting monit"
+}
+
+test_missing_version_counts_as_a_failure() {
+    export STUB_FAIL="no-version"
+    run_script
+    assert_stopped_with_monit_down "version"
 }
 
 test_removes_installer_after_success_and_failure() {
     run_script
     assert_exit_zero
     [[ -z "$(find /tmp -maxdepth 2 -name 'miniforge.sh')" ]] || fail "installer left after success"
-    reset_machine 2>/dev/null
+    reset_machine
     export STUB_FAIL="installer"
     run_script
     [[ -z "$(find /tmp -maxdepth 2 -name 'miniforge.sh')" ]] || fail "installer left after failure"
@@ -257,7 +297,8 @@ test_dry_run_prints_every_step_and_changes_nothing() {
     [[ "$before" == "$(find "$HOME" /data /tmp -not -path /tmp/output.log | sort)" ]] || fail "files changed"
     [[ ! -s "$CALLS" ]] || fail "dry run called: $(cat "$CALLS")"
     assert_monit_running
-    assert_output "wget"
+    assert_output "<temporary folder>/miniforge.sh https://github.com"
+    assert_output "bash <temporary folder>/miniforge.sh"
     assert_output "monit quit"
     assert_output "rm -rf $HOME/miniforge3 $HOME/.conda $HOME/.condarc $HOME/soxspipe_reductions"
     assert_output "-b -p $HOME/miniforge3"
@@ -269,7 +310,7 @@ test_dry_run_prints_every_step_and_changes_nothing() {
 }
 
 test_dry_run_reports_a_problem_and_still_prints_every_step() {
-    rm /data/raw/frame.fits
+    rm /data/raw/2026-01-19/frame.fits
     run_script --dry-run
     assert_exit_nonzero
     assert_output "/data/raw"

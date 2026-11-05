@@ -18,7 +18,7 @@ This page tells you how to update, run, and monitor the SOXS data-reduction pipe
 You need:
 
 - A login to `wsxpl` as the `pipeline` user.
-- At least 1 FITS file in `/data/raw`.
+- At least 1 FITS file in a dated folder in `/data/raw`, such as `/data/raw/2026-01-19/`. No frames directly in `/data/raw`.
 - No running `soxspipe` process. The script stops if it finds one.
 
 1. Log in:
@@ -27,19 +27,13 @@ You need:
    ssh -X pipeline@wsxpl
    ```
 
-2. Download the script and see what it will do. This changes nothing:
+2. Download the script and run the update:
 
    ```bash
-   cd
-   wget -O update-pipeline.sh https://raw.githubusercontent.com/thespacedoctor/soxspipe-la-silla-update/main/update-pipeline.sh
-   bash update-pipeline.sh --dry-run
+   wget -O ~/update-pipeline.sh https://raw.githubusercontent.com/thespacedoctor/soxspipe-la-silla-update/main/update-pipeline.sh && bash ~/update-pipeline.sh
    ```
 
-3. Run the update:
-
-   ```bash
-   bash update-pipeline.sh
-   ```
+To see what the script will do first, run `bash ~/update-pipeline.sh --dry-run`. This changes nothing.
 
 The script asks no questions. The last line of a good run gives the installed version:
 
@@ -47,13 +41,15 @@ The script asks no questions. The last line of a good run gives the installed ve
 Finished: soxspipe 0.19.0 is installed and monit is running.
 ```
 
-If a step fails, the script stops and names the step. It does not start monit after a failure. Fix the problem and run the script again. It is safe to run the script again after a failure, or after a lost connection, because each run starts from the beginning.
+If a step fails, the script stops and names the step. It does not start monit after a failure. Fix the problem and run the script again.
+
+It is safe to run the script again after a failure or a lost connection, because each run starts from the beginning.
 
 ## What the script does
 
 The script runs these steps in order:
 
-1. Checks the user name, the `monit` and `wget` commands, `/data/reduced`, and the FITS files in `/data/raw`.
+1. Checks the user name, the home folder, the `monit` and `wget` commands, `/data/reduced`, and the FITS files in `/data/raw`.
 2. Downloads the miniforge installer. A failed download leaves the old install in place.
 3. Stops monit.
 4. Stops with an error if a `soxspipe` process is running. The message lists the processes. monit stays stopped, so wait for the processes to finish and run the script again.
@@ -140,14 +136,16 @@ monit quit
 
 ### soxspipe prep did not finish
 
-The update stops with this message if `soxspipe prep` leaves a partial workspace. `soxspipe prep` shows no error in this case. One known cause is a FITS frame directly in `/data/raw`, not in a dated folder such as `/data/raw/2026-01-19/`. Move any such frames, then run the script again.
+The update stops with this message if `soxspipe prep` leaves a partial workspace. `soxspipe prep` shows no error in this case.
+
+In soxspipe 0.19.0, a FITS frame directly in `/data/raw` causes this. The script checks for such frames before it deletes anything.
 
 ### Database timeout or corruption
 
 Timeouts or corruption in the internal database can stall the pipeline. If an error points to the database:
 
 1. Disable the monit task (see [Start and stop the pipeline from monit](#start-and-stop-the-pipeline-from-monit)).
-2. Refresh the workspace:
+2. Refresh the workspace. This rebuilds the database:
 
    ```bash
    cd ~/soxspipe_reductions
@@ -194,7 +192,7 @@ Recipe Command: soxspipe mdark sof/20260123T144358_NIR_3_MDARK_2_0S_SOXS.sof -s 
 
 #### Data-organiser failures
 
-The data organiser has sometimes predicted the wrong path for an earlier calibration product. This should not happen, and a later release will fix it.
+The data organiser has sometimes predicted the wrong path for an earlier calibration product. This should not happen. Planned: a later release will fix it.
 
 ```text
 FileNotFoundError: the input file `./sessions/base/reduced/2026-01-28/soxs-mbias/20260129T130359_VIS_2X1_3_MBIAS_SOXS.fits` does not appear to exist

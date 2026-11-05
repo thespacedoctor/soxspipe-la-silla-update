@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Run shellcheck, then the behaviour tests in a throwaway container.
-# The tests delete files in the home folder, so they only ever run in a container.
+# RUN SHELLCHECK, THEN THE BEHAVIOUR TESTS IN A THROWAWAY CONTAINER.
+# THE TESTS DELETE FILES IN THE HOME FOLDER, SO THEY ONLY EVER RUN IN A CONTAINER.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
