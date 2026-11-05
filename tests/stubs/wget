@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# STAND-IN FOR WGET: "DOWNLOADS" A FAKE MINIFORGE INSTALLER
+echo "wget $*" >>"$CALLS"
+[[ "${STUB_FAIL:-}" == "wget" ]] && exit 4
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-O" ]]; then
+        cp "$STUBS_DIR/fake-miniforge-installer" "$2"
+    fi
+    shift
+done

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# STAND-IN FOR MONIT: A REAL BACKGROUND PROCESS NAMED `monit` PLAYS THE DAEMON
+echo "monit $*" >>"$CALLS"
+if [[ "${1:-}" == "quit" ]]; then
+    [[ "${STUB_FAIL:-}" == "monit-quit" ]] && exit 0
+    pkill -f "^$FAKE_DAEMON" || exit 1
+    exit 0
+fi
+[[ "${STUB_FAIL:-}" == "monit-start" ]] && exit 1
+"$FAKE_DAEMON" 600 >/dev/null 2>&1 &

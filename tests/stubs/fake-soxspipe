@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# STAND-IN FOR SOXSPIPE: THE REAL `prep` CAN EXIT 0 WITHOUT FINISHING THE WORKSPACE
+echo "soxspipe $* cwd=$PWD" >>"$CALLS"
+[[ "${STUB_FAIL:-}" == "prep" ]] && exit 1
+touch soxspipe.db
+[[ "${STUB_FAIL:-}" == "prep-silent" ]] && exit 0
+touch soxspipe.yaml

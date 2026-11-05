@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# STAND-IN FOR THE MINIFORGE INSTALLER: BUILDS A FAKE CONDA UNDER THE PREFIX
+echo "installer $* CONDA_PREFIX=${CONDA_PREFIX:-} cwd=$(pwd -P 2>/dev/null)" >>"$CALLS"
+[[ "${STUB_FAIL:-}" == "installer" ]] && exit 1
+prefix="$3"
+mkdir -p "$prefix/bin" "$prefix/etc/profile.d"
+cp "$STUBS_DIR/fake-conda" "$prefix/bin/conda"
+cat >"$prefix/etc/profile.d/conda.sh" <<CONDASH
+conda() {
+    if [[ "\$1" == "activate" ]]; then
+        echo "conda activate \$2" >>"\$CALLS"
+        PATH="$prefix/envs/\$2/bin:\$PATH"
+    else
+        "$prefix/bin/conda" "\$@"
+    fi
+}
+CONDASH
