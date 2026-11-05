@@ -77,7 +77,7 @@ on_exit() {
 
 first_fits_file() {
     # THE SAME FILE NAMES THAT `soxspipe prep` COUNTS AS RAW FRAMES
-    find "$RAW_DIR/" "$@" \( -iname '*.fits' -o -name '*.[fF][iI][tT][sS].Z' \) -print -quit 2>/dev/null
+    find "$RAW_DIR/" "$@" ! -type d \( -iname '*.fits' -o -name '*.[fF][iI][tT][sS].Z' \) -print -quit 2>/dev/null
 }
 
 check_machine() {

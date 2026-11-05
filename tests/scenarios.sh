@@ -172,7 +172,7 @@ test_refuses_to_run_with_a_wrong_home_folder() {
     assert_exit_nonzero
     assert_exists /tmp/other-home/miniforge3
     assert_old_install_kept
-    assert_output "HOME"
+    assert_output "HOME is not the home folder of the pipeline user"
     rm -rf /tmp/other-home
 }
 
