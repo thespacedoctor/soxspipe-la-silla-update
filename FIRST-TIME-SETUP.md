@@ -8,7 +8,6 @@ This page tells you how to prepare a new machine for the SOXS data-reduction pip
 - [Make the private monit files](#make-the-private-monit-files)
 - [Add the monit-web alias](#add-the-monit-web-alias)
 - [Run the update](#run-the-update)
-- [Repair Slack alerts without an update](#repair-slack-alerts-without-an-update)
 
 ## What the machine needs first
 
@@ -72,12 +71,3 @@ The alias works the next time you log in.
 ## Run the update
 
 Follow [Update the pipeline](README.md#update-the-pipeline) in the README. The update script installs the pipeline, makes the workspace, and starts monit.
-
-## Repair Slack alerts without an update
-
-Use these steps if Slack alerts fail with `bad interpreter`, and you do not want to run the update script. The update script deletes `soxspipe.db` and its QC history, and these steps do not.
-
-```bash
-~/miniforge3/bin/conda install --yes --name soxspipe ruby
-sed -i '1s|.*|#!/diska/home/pipeline/miniforge3/envs/soxspipe/bin/ruby|' ~/monit/monit2slack.rb
-```
