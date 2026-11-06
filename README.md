@@ -2,8 +2,6 @@
 
 This page tells you how to update, run, and monitor the SOXS data-reduction pipeline (`soxspipe`) on the `wsxpl` workstation at La Silla. It is for the people who maintain the pipeline on that machine.
 
-**Important:** `update-pipeline.sh` has not yet given a working install on `wsxpl`. The first run installed soxspipe 0.19.0, which could not use the `wsxpl` data folders. Use `--dry-run` first, and stay at the terminal during the next update.
-
 ## Contents
 
 - [Make the private monit files](#make-the-private-monit-files)
