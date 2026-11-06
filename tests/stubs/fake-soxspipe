@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
-# STAND-IN FOR SOXSPIPE: THE REAL `prep` CAN EXIT 0 WITHOUT FINISHING THE WORKSPACE
+# STAND-IN FOR SOXSPIPE: THE REAL `prep` CAN EXIT 0 WITHOUT FINISHING THE WORKSPACE,
+# AND A `prep` THAT WORKS DOES NOT PROVE THAT LATER COMMANDS WORK
 echo "soxspipe $* cwd=$PWD" >>"$CALLS"
+if [[ "$1" == "session" ]]; then
+    [[ "${STUB_FAIL:-}" == "session-ls" ]] && exit 1
+    [[ "${STUB_FAIL:-}" == "session-ls-silent" ]] && exit 0
+    if [[ "${STUB_FAIL:-}" == "session-ls-none" ]]; then
+        echo "No reduction sessions exist in this workspace yet."
+        exit 0
+    fi
+    if [[ "${STUB_FAIL:-}" == "session-ls-asterisks" ]]; then
+        echo "a * b * c"
+        exit 0
+    fi
+    printf '\033[0;32m*base*\033[38;5;15m\n'
+    exit 0
+fi
 [[ "${STUB_FAIL:-}" == "prep" ]] && exit 1
 touch soxspipe.db
 [[ "${STUB_FAIL:-}" == "prep-silent" ]] && exit 0

@@ -13,3 +13,7 @@ fi
 [[ "${STUB_FAIL:-}" == "monit-start" ]] && exit 1
 [[ "${STUB_FAIL:-}" == "monit-start-silent" ]] && exit 0
 "$FAKE_DAEMON" 600 >/dev/null 2>&1 &
+# THE REAL `monit` RETURNS AFTER THE DAEMON EXISTS. WITHOUT THIS WAIT, A BUSY MACHINE FAILS THE TEST AT RANDOM
+until pgrep -x monit >/dev/null; do
+    sleep 0.1
+done

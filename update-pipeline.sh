@@ -19,6 +19,10 @@ MONIT_HTTPD_FILE="$MONIT_DIR/monit-httpd.conf"
 SLACK_WEBHOOK_FILE="$MONIT_DIR/slack-webhook-url"
 ENVIRONMENT_DIR="$MINIFORGE_DIR/envs/soxspipe"
 PYTHON_VERSION="3.12"
+# EVERY COMMAND AFTER THE FIRST `prep` FAILS ON THIS MACHINE WITH OLDER VERSIONS
+MINIMUM_SOXSPIPE_VERSION="0.19.1"
+# `soxspipe session ls` PRINTS THE CURRENT SESSION IN GREEN, BETWEEN ASTERISKS
+CURRENT_SESSION_PATTERN=$'\033\\[0;32m\\*[^*]+\\*'
 MONIT_STOP_SECONDS="${MONIT_STOP_SECONDS:-30}"
 
 DRY_RUN=false
@@ -188,7 +192,7 @@ install_soxspipe() {
         # shellcheck source=/dev/null
         source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
     fi
-    run conda create --yes --name soxspipe "python=$PYTHON_VERSION" soxspipe ruby
+    run conda create --yes --name soxspipe "python=$PYTHON_VERSION" "soxspipe>=$MINIMUM_SOXSPIPE_VERSION" ruby
     run conda activate soxspipe
     if [[ "$DRY_RUN" == false ]]; then
         # monit2slack.rb NEEDS BOTH OF THESE. A MISSING RUBY IS WHAT STOPPED SLACK ALERTS BEFORE
@@ -207,6 +211,21 @@ prepare_workspace() {
     run soxspipe prep . --vlt
     # `soxspipe prep` CAN EXIT WITH STATUS 0 AND LEAVE A PARTIAL WORKSPACE WITH A DATABASE BUT NO SESSION
     [[ "$DRY_RUN" == true || -f soxspipe.yaml ]] || stop "soxspipe prep did not finish: there is no soxspipe.yaml in $WORKSPACE_DIR."
+}
+
+# THE FIRST `prep` CREATES THE LINK TO THE RAW FOLDER, SO ONLY A SECOND COMMAND SHOWS WHETHER SOXSPIPE ACCEPTS IT.
+# THE OUTPUT MATTERS AS WELL AS THE STATUS, BECAUSE SOXSPIPE CAN EXIT WITH STATUS 0 AND DO NOTHING.
+check_soxspipe_works() {
+    step "Checking that soxspipe works in the workspace"
+    if [[ "$DRY_RUN" == true ]]; then
+        run soxspipe session ls
+        return 0
+    fi
+    echo "+ soxspipe session ls"
+    local sessions
+    sessions="$(soxspipe session ls)" || stop "soxspipe session ls failed after soxspipe prep."
+    echo "$sessions"
+    [[ "$sessions" =~ $CURRENT_SESSION_PATTERN ]] || stop "soxspipe session ls did not list a current session after soxspipe prep."
 }
 
 install_monit_settings() {
@@ -260,6 +279,7 @@ main() {
     install_miniforge
     install_soxspipe
     prepare_workspace
+    check_soxspipe_works
     install_monit_settings
     start_monit
     report_result

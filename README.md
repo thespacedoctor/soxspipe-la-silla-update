@@ -2,7 +2,7 @@
 
 This page tells you how to update, run, and monitor the SOXS data-reduction pipeline (`soxspipe`) on the `wsxpl` workstation at La Silla. It is for the people who maintain the pipeline on that machine.
 
-**Important:** `update-pipeline.sh` has not yet run on `wsxpl`. It has only run in test containers. Use `--dry-run` first, and stay at the terminal during the first real update.
+**Important:** `update-pipeline.sh` has not yet given a working install on `wsxpl`. The first run installed soxspipe 0.19.0, which could not use the `wsxpl` data folders. Use `--dry-run` first, and stay at the terminal during the next update.
 
 ## Contents
 
@@ -65,10 +65,10 @@ To see what the script will do first, run `bash ~/update-pipeline.sh --dry-run`.
 
 **Warning:** `wsxpl` does not trust the certificate issuer of the GitHub downloads, so `wget` uses `--no-check-certificate` for this script, the miniforge installer, and the monit files. `wget` does not confirm that these files come from GitHub. They all run as the `pipeline` user, and monit runs its files again and again. Someone who controls the network path could run their own code on `wsxpl`.
 
-The script asks no questions. The last line of a good run gives the installed version:
+The script asks no questions. The last line of a good run gives the installed version, for example:
 
 ```text
-Finished: soxspipe 0.19.0 is installed and monit is running.
+Finished: soxspipe 0.19.1 is installed and monit is running.
 ```
 
 If a step fails, the script stops and names the step. It does not start monit after a failure. Fix the problem and run the script again.
@@ -86,10 +86,11 @@ The script runs these steps in order:
 5. Stops with an error if a `soxspipe` process is running. The message lists the processes. monit stays stopped, so wait for the processes to finish and run the script again.
 6. Deletes `~/miniforge3`, `~/.conda`, `~/.condarc`, and `~/soxspipe_reductions`.
 7. Installs miniforge in `~/miniforge3` and sets up conda for new shells.
-8. Creates the `soxspipe` conda environment with Python 3.12, Ruby, and the latest `soxspipe` from conda-forge. `monit2slack.rb` needs the Ruby.
+8. Creates the `soxspipe` conda environment with Python 3.12, Ruby, and the latest `soxspipe` from conda-forge, which must be 0.19.1 or later. `monit2slack.rb` needs the Ruby.
 9. Runs `soxspipe prep . --vlt` in a new `~/soxspipe_reductions` workspace.
-10. Replaces `~/.monitrc` with the copy in the `monit` folder of this repository. The first run keeps the old settings in `~/.monitrc.bak`.
-11. Starts monit.
+10. Runs `soxspipe session ls` and stops if it fails or lists no current session. A good `prep` does not prove that later commands work.
+11. Replaces `~/.monitrc` with the copy in the `monit` folder of this repository. The first run keeps the old settings in `~/.monitrc.bak`.
+12. Starts monit.
 
 **Warning:** Step 6 deletes the workspace database, `soxspipe.db`, and its `backups/` folder. This removes the QC history that the database holds. The frames in `/data/raw` and `/data/reduced` stay in place.
 
@@ -179,7 +180,26 @@ sed -i '1s|.*|#!/diska/home/pipeline/miniforge3/envs/soxspipe/bin/ruby|' ~/monit
 
 The update stops with this message if `soxspipe prep` leaves a partial workspace. `soxspipe prep` shows no error in this case.
 
-In soxspipe 0.19.0, a FITS frame directly in `/data/raw` causes this. The script checks for such frames before it deletes anything.
+A FITS frame directly in `/data/raw` causes this. The script checks for such frames before it deletes anything.
+
+### PackagesNotFoundInChannelsError during "Installing soxspipe"
+
+The update stops with this error if conda-forge does not yet offer the `soxspipe` version that the script needs. A new version can take some hours to appear after its release. The script has already deleted the old install at this step, and monit is stopped.
+
+Wait, and then run the script again. To avoid this error, confirm the version before you start. This command must list the version:
+
+```bash
+wget -qO- --no-check-certificate https://conda.anaconda.org/conda-forge/noarch/current_repodata.json | grep -o 'soxspipe-[0-9.]*-[^"]*conda' | sort -u
+```
+
+### soxspipe session ls failed after soxspipe prep
+
+The update stops with this message, or with `soxspipe session ls did not list a current session`, if `soxspipe` cannot use the new workspace. Monit stays stopped, because every monit cycle would fail.
+
+Read the lines above the message for the error from `soxspipe`. Then:
+
+1. Check that `~/soxspipe_reductions/raw` is a link to `/data/raw`.
+2. Fix the problem and run the script again.
 
 ### Database timeout or corruption
 

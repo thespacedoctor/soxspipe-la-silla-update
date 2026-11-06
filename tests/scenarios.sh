@@ -102,8 +102,9 @@ test_full_update_replaces_install_and_starts_monit() {
     assert_order "monit quit" "installer -b -p $HOME/miniforge3"
     assert_called "wget -nv --no-check-certificate -O"
     assert_called "conda init bash"
-    assert_called "conda create --yes --name soxspipe python=3.12 soxspipe ruby"
+    assert_called "conda create --yes --name soxspipe python=3.12 soxspipe>=0.19.1 ruby"
     assert_called "soxspipe prep . --vlt cwd=$HOME/soxspipe_reductions"
+    assert_order "soxspipe prep . --vlt" "soxspipe session ls cwd=$HOME/soxspipe_reductions"
     assert_last_call "monit "
     assert_monit_running
     assert_output "soxspipe 9.9.9"
@@ -342,6 +343,30 @@ test_prep_that_exits_zero_without_finishing_counts_as_a_failure() {
     assert_stopped_with_monit_down "soxspipe.yaml"
 }
 
+assert_monit_settings_not_replaced() { [[ "$(cat "$HOME/.monitrc")" == "old settings" ]] || fail "$HOME/.monitrc was replaced"; }
+
+test_command_that_fails_after_prep_stops_and_leaves_monit_stopped() {
+    export STUB_FAIL="session-ls"
+    run_script
+    assert_stopped_with_monit_down "soxspipe session ls failed after soxspipe prep"
+    assert_monit_settings_not_replaced
+}
+
+assert_no_current_session_stops_the_update() {
+    export STUB_FAIL="$1"
+    run_script
+    assert_stopped_with_monit_down "did not list a current session"
+    assert_monit_settings_not_replaced
+}
+
+test_silent_exit_zero_after_prep_counts_as_a_failure() { assert_no_current_session_stops_the_update "session-ls-silent"; }
+test_no_sessions_message_after_prep_counts_as_a_failure() { assert_no_current_session_stops_the_update "session-ls-none"; }
+test_stray_asterisks_after_prep_do_not_count_as_a_session() { assert_no_current_session_stops_the_update "session-ls-asterisks"; }
+
+test_raw_folder_is_a_link_as_on_the_workstation() {
+    [[ -L /data/raw ]] || fail "/data/raw is not a symlink"
+}
+
 test_failed_monit_start_is_reported() {
     export STUB_FAIL="monit-start"
     run_script
@@ -400,11 +425,12 @@ test_dry_run_prints_every_step_and_changes_nothing() {
     assert_output "rm -rf $HOME/miniforge3 $HOME/.conda $HOME/.condarc $HOME/soxspipe_reductions"
     assert_output "-b -p $HOME/miniforge3"
     assert_output "conda init bash"
-    assert_output "conda create --yes --name soxspipe python=3.12 soxspipe ruby"
+    assert_output "conda create --yes --name soxspipe python=3.12 soxspipe>=0.19.1 ruby"
     assert_output "monit/monit2slack.rb"
     assert_output "monit -t"
     assert_output "conda activate soxspipe"
     assert_output "soxspipe prep . --vlt"
+    assert_output "soxspipe session ls"
     assert_output "Starting monit"
 }
 
