@@ -7,3 +7,4 @@
 **FIXED**: Point the Slack "more info" link at monit port 8080 (DY-2096)
 **FIXED**: Require soxspipe 0.19.1 and run `soxspipe session ls` after `prep`, so a workspace that later commands cannot use stops the update (DY-2096)
 **DOCS**: Remove the README warning after the first good update on `wsxpl` (DY-2096)
+**DOCS**: Split the README into an update guide, `FIRST-TIME-SETUP.md`, and `tests/README.md`, and move the monit and recipe-error guides to the Google Doc (DY-2096)
